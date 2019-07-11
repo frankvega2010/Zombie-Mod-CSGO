@@ -1,3 +1,4 @@
+#include <smlib>
 #include <sourcemod>
 #include <cstrike.inc>
 #include <sdktools_functions>
@@ -6,7 +7,7 @@
 #include <sdktools_sound>
 #include <sdktools_gamerules>
 #include <sdkhooks>
-
+#include <csgoitems>
 
 new Handle:CallhTimerTest; 
 new Seconds;
@@ -15,6 +16,8 @@ new bool:FirstZombiePicked = false;
 new bool:lastSurvivorPicked = false;
 new bool:ZombiesWin = false;
 new bool:SurvivorsWin = false;
+new bool:SetCTScoreOnce = false;
+new bool:SetTTScoreOnce = false;
 int g_roundStartedTime = -1;
 Handle hudtext;
 Handle hudtext2;
@@ -36,7 +39,6 @@ public OnPluginStart()
 	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
 	HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
 	HookEvent("player_blind", Event_PlayerBlind, EventHookMode_Pre); 
-	HookEvent("item_pickup", Event_ItemPickUp, EventHookMode_Pre);
 	HookEvent("round_start", Event_RoundStart, EventHookMode_Pre);
 	HookEvent("round_end", Event_RoundEnd, EventHookMode_Pre);
 }
@@ -47,14 +49,6 @@ public OnMapStart()
 	PrecacheSound("player/vo/seal/ct_death01.wav");
 	PrecacheSound("music/skog_03/bombplanted.mp3");
 	PrecacheSound("music/skog_02/lostround.mp3");
-}
-
-public OnClientPutInServer(client)
-{
-	if( IsFakeClient( client ) )
-    {
-        SDKHook(client, SDKHook_OnTakeDamage, OnTakeDamage);
-    }
 }
 
 public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
@@ -105,7 +99,13 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 		if(ZombiesWin && !SurvivorsWin)
 		{
 			CS_TerminateRound(GetConVarFloat(FindConVar("mp_round_restart_delay")), CSRoundEnd_TerroristWin);
-			//CS_SetTeamScore(CS_TEAM_T, CS_GetTeamScore(CS_TEAM_T) + 1);
+			
+			if(!SetCTScoreOnce)
+			{
+				SetTeamScore(CS_TEAM_T, GetTeamScore(CS_TEAM_T) + 1);
+				SetCTScoreOnce = true;
+			}
+			
 			for (new i = 1; i <= MaxClients; i++) 
 			{
 				if (IsClientInGame(i)) 
@@ -124,7 +124,7 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 		if(!lastSurvivorPicked)
 		{
 			decl String:lastSurvivor[64]; 
-			for (new i = 1; i <= MaxClients + 1; i++) 
+			for (new i = 1; i <= MaxClients; i++) 
 			{
 				if(IsClientInGame(i))
 				{
@@ -165,38 +165,20 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 	}
 }
 
-public void Event_ItemPickUp(Event event, const char[] name, bool dontBroadcast)
-{
-	int userId = event.GetInt("userid");
-	int user = GetClientOfUserId(userId);	
-		
-	if(GetClientTeam(user) == CS_TEAM_T) if (IsClientInGame(user)) GiveItemsTT(user); //
-}
-
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) 
 {
 	FirstZombiePicked = false;
 	lastSurvivorPicked = false;
 	FirstZombiePicked = false;
 	lastSurvivorPicked = false;
+	SetCTScoreOnce = false;
+	SetTTScoreOnce = false;
 	
 	g_roundStartedTime = GetTime();
 	
-	for (new i = 1; i <= MaxClients; i++) 
-	{
-    	//ServerCommand("sm_gunmenu");
-	}
-	
-	new firstzombie;
-	do
-	{
-		firstzombie = GetRandomInt(1, MaxClients);
-	}
-	while(!IsClientInGame(firstzombie)); // check this
-	
 	Seconds = 15;
 	CallhTimerTest = CreateTimer(1.0, Test, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	CreateTimer(17.0, PickZombie,firstzombie); // 2 more seconds than the "Seconds" variable
+	CreateTimer(17.0, PickZombie); // 2 more seconds than the "Seconds" variable
 	CreateTimer(1.0, ForceCTWin, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 }
 
@@ -206,36 +188,40 @@ public Action:Event_RoundEnd(Handle:event, const String:name[], bool:dontBroadca
 	lastSurvivorPicked = false;
 	FirstZombiePicked = false;
 	lastSurvivorPicked = false;
-	//if(CallhTimerTest != INVALID_HANDLE)
-    //{ 
-   //     KillTimer(CallhTimerTest);
-   //     CallhTimerTest = INVALID_HANDLE; 
-   // }
 }
 
-public Action:PickZombie(Handle:timer,any:firstzombie)
+public Action:PickZombie(Handle:timer)
 {
 	if(!FirstZombiePicked)
 	{
+		FirstZombiePicked = true;
+		
+		new firstzombie;
+		do
+		{
+			firstzombie = GetRandomInt(1, MaxClients);
+		}
+		while(!IsClientInGame(firstzombie)); 
+	
 		if(IsClientInGame(firstzombie))
 		{
-			FirstZombiePicked = true;
-
-			decl String:nick[64]; 
+			decl String:nick[64];
 			GetClientName(firstzombie, nick, sizeof(nick));
 			
 			CS_SwitchTeam(firstzombie, CS_TEAM_T);
 			CS_UpdateClientModel(firstzombie);
 			GiveItemsTT(firstzombie);
 			
-			EmitSoundToAll("coop_radio/m1_finish.wav",SNDCHAN_WEAPON);
+			EmitSoundToAll("coop_radio/m1_finish.wav",SNDLEVEL_NORMAL);
 			
 			for(new i = 1; i <= MaxClients; i++)
 			{ 
 					if(IsClientInGame(i))
 					{
-						SetHudTextParams(0.3, 0.5, 3.0, 50, 255, 50, 255);
-						ShowSyncHudText(i,hudtext,"[ZombieMod] %s is the first zombie! Run!!", nick);
+						SetHudTextParams(0.3, 0.5, 3.0, 255, 50, 50, 255);
+						ShowSyncHudText(i,hudtext,"%s", nick);
+						SetHudTextParams(0.3, 0.45, 3.0, 50, 255, 50, 255);
+						ShowSyncHudText(i,hudtext2,"is the first zombie! Run!!");
 					}	
 			}
 		}
@@ -253,7 +239,12 @@ public Action:ForceCTWin(Handle:timer)
 	
 	if(roundtime >= GameRules_GetProp("m_iRoundTime"))
 	{
-		//CS_SetTeamScore(CS_TEAM_CT, CS_GetTeamScore(CS_TEAM_CT) + 1);
+		if(!SetTTScoreOnce)
+		{
+			SetTeamScore(CS_TEAM_CT, GetTeamScore(CS_TEAM_CT) + 1);
+			SetTTScoreOnce = true;
+		}
+		
 		CS_TerminateRound(GetConVarFloat(FindConVar("mp_round_restart_delay")), CSRoundEnd_CTWin);
 	}	
 }
@@ -287,32 +278,6 @@ public Action:Test(Handle:timer)
 	return Plugin_Continue; 
 }
 
-public Action:OnTakeDamage(victim, &attacker, &inflictor, &Float:damage, &damagetype)
-{
-    if(IsClientInGame(victim) && IsClientInGame(attacker))
-    {
-		decl String:sWeapon[32];
-		GetClientWeapon(attacker, sWeapon, sizeof(sWeapon));
-        
-		if(GetClientTeam(attacker) == CS_TEAM_T)
-		{
-			if(StrEqual(sWeapon, "weapon_knife_t"))
-       		{
-            	damage = 2000.0;
-            	return Plugin_Changed;
-        	}
-        	
-			if(StrEqual(sWeapon, "weapon_flashbang"))
-       		{
-            	damage = 50.0;
-            	return Plugin_Changed;
-        	}
-		}
-        
-    }
-    return Plugin_Continue;
-}
-
 public Action:Event_PlayerBlind(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	for(new i = 1; i <= MaxClients; i++)
@@ -326,7 +291,7 @@ public Action:Event_PlayerBlind(Handle:event, const String:name[], bool:dontBroa
 
 public Action:GiveFlashbang(Handle:timer,any:user)
 {
-	GivePlayerItem(user, "weapon_flashbang");
+	Client_GiveWeaponAndAmmo(user, "weapon_flashbang", false, 2, 0, 1,0);
 }
 
 public Action:GiveItemsCT(any:ct)
@@ -334,11 +299,7 @@ public Action:GiveItemsCT(any:ct)
 	if(IsClientInGame(ct))
 	{
 		CS_SwitchTeam(ct, CS_TEAM_CT);
-		if(GetPlayerWeaponSlot(ct, CS_SLOT_PRIMARY) != -1) RemovePlayerItem(ct, GetPlayerWeaponSlot(ct, CS_SLOT_PRIMARY));
-		if(GetPlayerWeaponSlot(ct, CS_SLOT_SECONDARY) != -1) RemovePlayerItem(ct, GetPlayerWeaponSlot(ct, CS_SLOT_SECONDARY));
-		if(GetPlayerWeaponSlot(ct, CS_SLOT_GRENADE) == 43) RemovePlayerItem(ct, 43);
-		GivePlayerItem(ct, "weapon_ak47");
-		GivePlayerItem(ct, "weapon_fiveseven");
+		Client_RemoveWeapon(ct, "weapon_flashbang");
 		GivePlayerItem(ct, "weapon_breachcharge");
 		CS_UpdateClientModel(ct);
 		SetEntityRenderColor(ct, 255, 255, 255, 255);
@@ -349,15 +310,12 @@ public Action:GiveItemsCT(any:ct)
 public Action:GiveItemsTT(any:tt)
 {
 	if(IsClientInGame(tt))
-	{
+	{		
 		if(GetClientTeam(tt) == CS_TEAM_CT ) CS_SwitchTeam(tt, CS_TEAM_T);
-	
-		if(GetPlayerWeaponSlot(tt, CS_SLOT_PRIMARY) != -1) RemovePlayerItem(tt, GetPlayerWeaponSlot(tt, CS_SLOT_PRIMARY));
-		if(GetPlayerWeaponSlot(tt, CS_SLOT_SECONDARY) != -1) RemovePlayerItem(tt, GetPlayerWeaponSlot(tt, CS_SLOT_SECONDARY));
-		RemovePlayerItem(tt, 70);
-		GivePlayerItem(tt, "weapon_flashbang");
-		GivePlayerItem(tt, "weapon_flashbang");
-		GivePlayerItem(tt, "weapon_flashbang");
+			
+		Client_RemoveAllWeapons(tt, "weapon_knife");
+		CreateTimer(0.1, GiveFlashbang,tt); // 2 more seconds than the "Seconds" variable	
+
 		SetEntityRenderColor(tt, 230, 10, 10, 255);
 		SetEntityHealth(tt, 500);
 	}
